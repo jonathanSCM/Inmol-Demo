@@ -32,8 +32,6 @@ const PANEL = {
 
   /* --- Comportamiento del kiosco ------------------------------------------ */
   config: {
-    // Idioma para la voz del sistema (respaldo si falta un audio).
-    idiomaVoz: 'es-BO',
     // Segundos sin que nadie toque la pantalla antes de volver al modo atracción.
     segundosInactividad: 90,
     // Segundos que dura cada slide del modo atracción.
@@ -434,68 +432,5 @@ const PANEL = {
         unidad: 'terreno', unidadPlural: 'terrenos'
       }
     }
-  ],
-
-  /* --- ASISTENTE DE VOZ ---------------------------------------------------
-     Tarjeta fija a la derecha, siempre visible. No hay botón: al entrar al
-     panel se presenta solo y cuenta qué proyectos hay. Cada pregunta es un
-     botón que responde hablando y lleva la pantalla a la sección adecuada.
-     Al cambiar cualquier texto de aquí hay que regenerar los audios:
-       node herramientas/generar-voces.js
-     ---------------------------------------------------------------------- */
-  asistente: {
-    saludo: 'Bienvenido a INMOL, desarrollos inmobiliarios con respaldo y ' +
-            'confianza. Le presento nuestros proyectos: Urbanización El ' +
-            'Encanto y El Encanto 2, en La Guardia; y Centro Comercial ' +
-            'Libertad, en la zona sur de Santa Cruz. Toque el proyecto que ' +
-            'desea conocer, o elija una de las preguntas de esta lista.',
-
-    preguntas: [
-      {
-        id: 'ubicacion',
-        texto: '¿Dónde está y qué hay cerca?',
-        seccion: 'ubicacion',
-        respuesta: p => {
-          const tres = (p.referencias || []).slice(0, 3)
-            .map(r => `${r.nombre} a ${r.distancia}`).join(', ');
-          return `${p.nombre} se encuentra en ${p.direccion}. ` +
-                 `En el mapa puede ver su ubicación exacta. Cerca encontrará ${tres}.`;
-        }
-      },
-      {
-        id: 'disponibilidad',
-        texto: 'Ver disponibilidad',
-        seccion: 'lotes',
-        respuesta: p => `Le muestro el plano de ${p.nombre}. En verde están las ` +
-                        `unidades disponibles, en ámbar las reservadas y en gris ` +
-                        `las vendidas. Puede tocar cualquiera para ver su código, ` +
-                        `superficie y categoría.`
-      },
-      {
-        id: 'ficha',
-        texto: 'Ficha técnica',
-        seccion: 'ficha',
-        respuesta: p => {
-          const f = (p.fichaTecnica || []).slice(0, 4)
-            .map(x => `${x.campo}: ${x.valor}`).join('. ');
-          return `Ficha técnica de ${p.nombre}. ${f}.`;
-        }
-      },
-      {
-        id: 'servicios',
-        texto: '¿Qué servicios tiene?',
-        seccion: 'resumen',
-        respuesta: p => `El proyecto cuenta con ${(p.servicios || []).slice(0, 4).join(', ')}, ` +
-                        `entre otros servicios.`
-      },
-      {
-        id: 'precio',
-        texto: '¿Cuál es el precio?',
-        seccion: null,
-        respuesta: () => `Los precios y planes de pago se elaboran de forma ` +
-                         `personalizada. Un asesor de INMOL le preparará una ` +
-                         `cotización a su medida en este mismo momento.`
-      }
-    ]
-  }
+  ]
 };

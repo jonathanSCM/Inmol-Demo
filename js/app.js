@@ -15,10 +15,7 @@ const Estado = {
   seccion: 'resumen',
   temporizadorAtraccion: null,
   temporizadorInactividad: null,
-  indiceAtraccion: 0,
-  /* Ya se saludó a este visitante. Se reinicia cuando el panel vuelve
-     solo al modo atracción, que es cuando llega alguien nuevo. */
-  yaSaludo: false
+  indiceAtraccion: 0
 };
 
 /* Cache de renders satelitales: se dibuja una vez y se reutiliza siempre. */
@@ -83,35 +80,11 @@ function svgIcono(d, tam = 22) {
    NAVEGACIÓN ENTRE PANTALLAS
    ============================================================================ */
 function irA(pantalla) {
-  const anterior = Estado.pantalla;
   $$('.pantalla').forEach(p => p.classList.toggle('activa', p.id === pantalla));
   Estado.pantalla = pantalla;
 
-  /* El asistente acompaña todas las pantallas, incluida la de atracción:
-     se presenta solo al entrar, sin que nadie toque nada. */
-  $('#asistente').classList.add('visible');
-  construirOpcionesAsistente();
-
-  if (pantalla === 'atraccion') {
-    iniciarAtraccion();
-    /* Se vuelve al modo atracción porque el cliente se fue. Si el asistente
-       estaba a mitad de una respuesta —la ficha técnica dura casi medio
-       minuto— seguía hablando solo frente a una pantalla que ya no mostraba
-       ese proyecto, y el siguiente visitante llegaba a un panel narrando algo
-       que no venía a cuento. */
-    if (anterior !== 'atraccion') { callarAsistente(); escribir(); }
-  } else {
-    detenerAtraccion();
-    /* Alguien despertó la pantalla. Sólo se saluda si a este visitante no se
-       le saludó ya: al cargar el panel la presentación suena sola, y sin esta
-       comprobación el primer toque la repetía desde el principio. */
-    if (anterior === 'atraccion' && !Estado.yaSaludo) {
-      Estado.yaSaludo = true;
-      decir(PANEL.asistente.saludo, 'saludo');
-    } else {
-      escribir();
-    }
-  }
+  if (pantalla === 'atraccion') iniciarAtraccion();
+  else detenerAtraccion();
 
   reiniciarInactividad();
 }
@@ -242,12 +215,6 @@ function abrirProyecto(id, seccion = 'resumen') {
 
   irA('proyecto');
   mostrarSeccion(seccion);
-
-  /* El asistente explica SIEMPRE el proyecto que se acaba de abrir, se haya
-     tocado la tarjeta grande o la lista del asistente. Antes sólo hablaba la
-     lista: al tocar la tarjeta seguía sonando la presentación de bienvenida,
-     que no tenía nada que ver con lo que el cliente estaba mirando. */
-  decir(`${p.nombre}. ${p.claim} ${p.descripcion}`, `proyecto-${p.id}`);
 }
 
 function construirTabs() {
@@ -263,36 +230,9 @@ function construirTabs() {
     const etiqueta = (s.id === 'lotes' && Estado.proyecto && Estado.proyecto.plano.etiqueta)
       ? Estado.proyecto.plano.etiqueta : s.etiqueta;
     b.innerHTML = svgIcono(ICONO_TAB[s.id], 20) + `<span>${etiqueta}</span>`;
-    b.addEventListener('click', () => {
-      mostrarSeccion(s.id);
-      explicarSeccion(s.id);
-    });
+    b.addEventListener('click', () => mostrarSeccion(s.id));
     nav.appendChild(b);
   });
-}
-
-/* Explica en voz alta la sección que se acaba de abrir.
-   Cada pestaña tiene una pregunta equivalente en el asistente —Ubicación,
-   Disponibilidad, Ficha técnica y, para Resumen, la de servicios— así que se
-   reutiliza esa misma respuesta y su audio ya grabado: no hace falta grabar
-   nada nuevo. También se marca la opción correspondiente en la lista, para que
-   las pestañas de arriba y el menú del asistente no cuenten cosas distintas. */
-function explicarSeccion(id) {
-  const p = Estado.proyecto;
-  if (!p) return;
-  const q = (PANEL.asistente.preguntas || []).find(x => x.seccion === id);
-  if (!q) return;
-  decir(q.respuesta(p), `${p.id}--${q.id}`);
-  marcarOpcion(q.id);
-}
-
-/* Deja resaltada una sola pregunta de la lista del asistente.
-   Sólo toca las preguntas (las que llevan data-q): el proyecto abierto también
-   se resalta y tiene que seguir marcado, si no el cliente pierde de vista cuál
-   está mirando. */
-function marcarOpcion(idPregunta) {
-  $$('.asis-opcion[data-q]').forEach(o =>
-    o.classList.toggle('activa', o.dataset.q === idPregunta));
 }
 
 function mostrarSeccion(id) {
@@ -584,8 +524,6 @@ function reiniciarInactividad() {
   clearTimeout(Estado.temporizadorInactividad);
   if (QUIETO || Estado.pantalla === 'atraccion') return;
   Estado.temporizadorInactividad = setTimeout(() => {
-    /* Vuelve al modo atracción: el próximo que toque es otro visitante. */
-    Estado.yaSaludo = false;
     Estado.proyecto = null;
     irA('atraccion');
   }, PANEL.config.segundosInactividad * 1000);
@@ -616,113 +554,8 @@ function alternarDiagnostico() {
 /* ============================================================================
    7. ARRANQUE
    ============================================================================ */
-/* ============================================================================
-   ASISTENTE DE VOZ
-   ============================================================================ */
-
-/* Cambia el texto del asistente sin hablar */
-/* El asistente es de voz: ya no se transcribe lo que dice.
-   INMOL pidió quitar el cuadro de texto —leerlo hacía que el cliente dejara
-   de mirar el proyecto— así que sólo queda el estado y la lista de opciones. */
-function escribir() {
-  if (!Voz.sonando()) $('#asisEstado').textContent = 'Toque una pregunta';
-}
-
-function callarAsistente() {
-  Voz.callar();
-  $('#asisAvatar').classList.remove('hablando');
-  $('#asisEstado').textContent = 'Toque una pregunta';
-}
-
-/* clave: identifica el audio pregrabado (assets/voz/indice.js). Si falta,
-   Voz recurre al motor de voz del sistema. */
-function decir(texto, clave) {
-  $('#asisEstado').textContent = 'Hablando…';
-  $('#asisAvatar').classList.add('hablando');
-  Voz.hablar(texto, () => {
-    $('#asisAvatar').classList.remove('hablando');
-    $('#asisEstado').textContent = 'Toque una pregunta';
-  }, clave);
-}
-
-/* Presentación al entrar. Los navegadores bloquean el audio antes de que el
-   usuario interactúe; en el kiosco no pasa porque INICIAR PANEL.bat arranca
-   Chrome con --autoplay-policy=no-user-gesture-required. Si igual quedara
-   bloqueado, el texto queda en pantalla y la voz suena al primer toque. */
-function presentarse() {
-  Estado.yaSaludo = true;
-  decir(PANEL.asistente.saludo, 'saludo');
-
-  /* Chrome puede bloquear el audio hasta que alguien toque la pantalla. Si eso
-     pasó, el primer toque lo desbloquea y se repite la bienvenida.
-     PERO ese toque casi siempre es «abrir un proyecto»: el listener corre en
-     fase de captura, o sea ANTES del clic de la tarjeta, así que lanzaba la
-     bienvenida entera y encima arrancaba la del proyecto — dos voces a la vez,
-     y el cliente escuchando una presentación que ya no correspondía.
-     Ahora se espera medio segundo antes de decidir: para entonces el clic ya
-     corrió, así que basta con mirar si pidió otra frase.
-     OJO con el criterio: no sirve exigir que el toque «no cambie de pantalla».
-     El primer toque siempre pasa de la atracción al menú, así que con esa
-     condición la bienvenida no sonaba nunca en un navegador normal. Lo que
-     importa es sólo si hay algo más que decir. */
-  setTimeout(() => {
-    if (Voz.sonando()) return;
-    const alTocar = () => {
-      document.removeEventListener('pointerdown', alTocar, true);
-      const pedidos = Voz.pedidos;
-      setTimeout(() => {
-        if (Voz.sonando()) return;             // ya está hablando otra cosa
-        if (Voz.pedidos !== pedidos) return;   // el toque abrió un proyecto: ése manda
-        decir(PANEL.asistente.saludo, 'saludo');
-      }, 500);
-    };
-    document.addEventListener('pointerdown', alTocar, true);
-  }, 700);
-}
-
-function construirOpcionesAsistente() {
-  const cont = $('#asisOpciones');
-  cont.innerHTML = '';
-  const flecha = svgIcono('M9 6l6 6-6 6', 18);
-
-  const g1 = document.createElement('div');
-  g1.className = 'asis-grupo';
-  g1.textContent = Estado.proyecto ? 'Cambiar de proyecto' : 'Elija un proyecto';
-  cont.appendChild(g1);
-
-  PANEL.proyectos.forEach(p => {
-    const b = document.createElement('button');
-    b.className = 'asis-opcion' + (Estado.proyecto && Estado.proyecto.id === p.id ? ' activa' : '');
-    b.innerHTML = `<span>${p.nombre}</span>${flecha}`;
-    // No dice nada acá: abrirProyecto() ya se encarga de presentarlo.
-    b.addEventListener('click', () => abrirProyecto(p.id));
-    cont.appendChild(b);
-  });
-
-  if (Estado.proyecto) {
-    const g2 = document.createElement('div');
-    g2.className = 'asis-grupo';
-    g2.textContent = 'Preguntas frecuentes';
-    cont.appendChild(g2);
-
-    PANEL.asistente.preguntas.forEach(q => {
-      const b = document.createElement('button');
-      b.className = 'asis-opcion';
-      b.innerHTML = `<span>${q.texto}</span>${flecha}`;
-      b.dataset.q = q.id;
-      b.addEventListener('click', () => {
-        if (q.seccion) mostrarSeccion(q.seccion);
-        decir(q.respuesta(Estado.proyecto), `${Estado.proyecto.id}--${q.id}`);
-        marcarOpcion(q.id);
-      });
-      cont.appendChild(b);
-    });
-  }
-}
-
 function iniciar() {
   if (QUIETO) document.body.classList.add('sin-animacion');
-  Voz.iniciar();
   $('#aviso').hidden = !PANEL.config.datosDeEjemplo;
   construirMenu();
 
@@ -730,7 +563,6 @@ function iniciar() {
   $('#atraccion').addEventListener('click', () => irA('menu'));
 
   $('#btnVolver').addEventListener('click', () => { Estado.proyecto = null; irA('menu'); });
-  $('#asisSilencio').addEventListener('click', callarAsistente);
   $('#btnVerTodo').addEventListener('click', () => MapaReal.centrar());
   $('#btnAcercar').addEventListener('click', () => MapaReal.acercar());
   $('#btnCerrarTour').addEventListener('click', cerrarTour360);
@@ -772,11 +604,6 @@ function iniciar() {
      cualquier vista concreta — útil para pruebas y para capturas. */
   aplicarRuta();
   window.addEventListener('hashchange', aplicarRuta);
-
-  /* El asistente se presenta solo, sin botón. El texto se escribe siempre;
-     la voz sólo cuando el panel está en uso real (no al tomar capturas). */
-  escribir();
-  if (!QUIETO) setTimeout(presentarse, 600);
 }
 
 function aplicarRuta() {

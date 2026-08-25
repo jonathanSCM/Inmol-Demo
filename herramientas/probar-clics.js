@@ -60,18 +60,10 @@ const ALTO  = parseInt(process.argv[4], 10) || 1080;
   const ok = (n, c) => resultados.push((c ? '  OK  ' : ' FALLA ') + n);
 
   /* 1. Toda la superficie de la atracción debe abrir el menú */
-  const zona = await pagina.evaluate(() => {
-    const a = document.getElementById('asistente').getBoundingClientRect();
-    const alPie = a.top > innerHeight / 2;          // en el tótem va abajo
-    return {
-      ancho: alPie ? innerWidth : Math.round(a.left) - 8,
-      alto:  alPie ? Math.round(a.top) - 8 : innerHeight
-    };
-  });
   const puntos = [];
   for (const fy of [0.02, 0.2, 0.4, 0.6, 0.8, 0.98])
     for (const fx of [0.02, 0.2, 0.4, 0.6, 0.8, 0.98])
-      puntos.push([Math.round(zona.ancho * fx), Math.round(zona.alto * fy)]);
+      puntos.push([Math.round(ANCHO * fx), Math.round(ALTO * fy)]);
 
   const fallidos = [];
   for (const [x, y] of puntos) {
@@ -79,7 +71,7 @@ const ALTO  = parseInt(process.argv[4], 10) || 1080;
     await pagina.mouse.click(x, y); await esperar(140);
     if ((await estado()).pantalla !== 'menu') fallidos.push(`(${x},${y})`);
   }
-  ok(`Atracción: ${puntos.length - fallidos.length}/${puntos.length} puntos del área de contenido (${zona.ancho}x${zona.alto}) abren el menú` +
+  ok(`Atracción: ${puntos.length - fallidos.length}/${puntos.length} puntos abren el menú` +
      (fallidos.length ? ' — fallan ' + fallidos.join(' ') : ''), fallidos.length === 0);
 
   /* 2. Las tres tarjetas: cuerpo y flecha */
@@ -119,63 +111,58 @@ const ALTO  = parseInt(process.argv[4], 10) || 1080;
     ok(`Pestaña ${i + 1} → ${e.seccion}`, e.seccion === esperadas[i]);
   }
 
-  /* El plano oficial se dibuja con Leaflet: cada unidad es un path
-     .leaflet-interactive sobre la imagen del plano. */
-  await clicSel('.tab', 2); await esperar(1500);
-  const sel = await pagina.evaluate(() =>
-    document.querySelectorAll('.leaflet-interactive').length ? '.leaflet-interactive'
-    : (document.querySelectorAll('.unidad').length ? '.unidad' : '.plano-svg .lote'));
-  const total = await pagina.evaluate(s => document.querySelectorAll(s).length, sel);
-  await clicSel(sel, Math.min(40, Math.max(0, total - 1))); await esperar(400);
+  await clicSel('.tab', 2); await esperar(300);
+  await clicSel('.plano-svg .lote', 25); await esperar(220);
   let e = await estado();
-  ok(`Clic en una unidad del plano (${total} unidades) → ${e.lote || 'NADA'}`, !!e.lote);
+  ok(`Clic en un lote → ${e.lote || 'NADA'}`, !!e.lote);
 
   await clicSel('.filtro', 1); await esperar(220);
   e = await estado();
   ok(`Filtro «sólo disponibles» → ${e.filtro}`, e.filtro === 'disponible');
 
-  /* El mapa satelital es offline y siempre está: ya no hay respaldo generado. */
-  await clicSel('.tab', 1); await esperar(1200);
-  const mapa = await pagina.evaluate(() => {
-    const c = document.getElementById('mapaReal').getBoundingClientRect();
-    return {
+  /* Ubicación: con internet se usa el mapa real; sin internet, la vista
+     satelital generada. Se comprueba el que esté activo. */
+  await clicSel('.tab', 1); await esperar(900);
+  const conMapaReal = await pagina.evaluate(() => !!Estado.usaMapaReal);
+
+  if (conMapaReal) {
+    const mapa = await pagina.evaluate(() => ({
       pines: document.querySelectorAll('.pin-ref').length,
       proyecto: document.querySelectorAll('.pin-proyecto').length,
-      teselas: document.querySelectorAll('.leaflet-tile-loaded').length,
-      alto: Math.round(c.height)
-    };
-  });
-  ok(`Mapa satelital offline · ${mapa.teselas} teselas, contenedor de ${mapa.alto}px de alto`,
-     mapa.teselas > 0 && mapa.alto > 100);
-  ok(`Pin del proyecto y ${mapa.pines} pines de referencia`,
-     mapa.proyecto === 1 && mapa.pines >= 3);
+      teselas: document.querySelectorAll('.leaflet-tile-loaded').length
+    }));
+    ok(`Mapa real activo · ${mapa.teselas} teselas cargadas`, mapa.teselas > 0);
+    ok(`Pin del proyecto y ${mapa.pines} pines de referencia`,
+       mapa.proyecto === 1 && mapa.pines >= 3);
 
-  await clicSel('#btnAcercar', 0); await esperar(2600);
-  const z1 = await pagina.evaluate(() => MapaReal.mapa.getZoom());
-  ok(`«Acercar al proyecto» → zoom ${z1}`, z1 >= 16);
+    await clicSel('#btnAcercar', 0); await esperar(2600);
+    const z1 = await pagina.evaluate(() => MapaReal.mapa.getZoom());
+    ok(`«Acercar al proyecto» → zoom ${z1}`, z1 >= 16);
 
-  await clicSel('#btnVerTodo', 0); await esperar(1400);
-  const z2 = await pagina.evaluate(() => MapaReal.mapa.getZoom());
-  ok(`«Ver todo» encuadra las referencias → zoom ${z2}`, z2 < z1);
+    await clicSel('#btnVerTodo', 0); await esperar(1200);
+    const z2 = await pagina.evaluate(() => MapaReal.mapa.getZoom());
+    ok(`«Ver todo» encuadra las referencias → zoom ${z2}`, z2 < z1);
+  } else {
+    await clicSel('.sat-nivel', 3); await esperar(320);
+    e = await estado();
+    ok(`Sin internet · nivel satelital «Predio» → nivel ${e.nivel}`, e.nivel === 3);
+    await clicSel('#btnSobrevuelo', 0); await esperar(400);
+    ok('Sin internet · «Sobrevuelo automático» responde',
+       await pagina.evaluate(() => Estado.sobrevolando));
+  }
 
-  /* 4. El asistente ocupa su columna sin taparle nada al contenido */
-  await esperar(4000);
-  const geo = await pagina.evaluate(() => {
-    const a = document.getElementById('asistente').getBoundingClientRect();
+  /* 4. El contenido usa todo el ancho: no debe quedar franja muerta */
+  await esperar(6000);
+  const aprovechado = await pagina.evaluate(() => {
     const p = document.querySelector('.pane.activa').getBoundingClientRect();
-    const b = document.querySelector('.barra-proy').getBoundingClientRect();
-    const sep = (r1, r2) => r1.right <= r2.left + 1 || r2.right <= r1.left + 1 ||
-                            r1.bottom <= r2.top + 1 || r2.bottom <= r1.top + 1;
     return {
-      separado: sep(a, p) && sep(a, b),
-      margen: Math.round(innerWidth - a.right),
-      radio: parseFloat(getComputedStyle(document.getElementById('asistente')).borderRadius),
-      hayBoton: !!document.querySelector('#btnAsistente, .btn-asistente')
+      ancho: Math.round(p.width), alto: Math.round(p.height),
+      pctAncho: Math.round(p.width / innerWidth * 100),
+      pctAlto: Math.round(p.height / innerHeight * 100)
     };
   });
-  ok('El asistente no se superpone con el contenido', geo.separado);
-  ok(`Separado del borde (${geo.margen}px), redondeado (${geo.radio}px), sin botón`,
-     geo.margen >= 8 && geo.radio >= 8 && !geo.hayBoton);
+  ok(`El contenido ocupa ${aprovechado.pctAncho}% del ancho y ${aprovechado.pctAlto}% del alto`,
+     aprovechado.pctAncho >= 90);
 
   await clicSel('#btnVolver', 0); await esperar(400);
   e = await estado();
