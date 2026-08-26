@@ -1,0 +1,239 @@
+<meta charset="utf-8">
+<title>INMOL · Trazar el contorno del terreno</title>
+<!-- ============================================================================
+     INMOL · Panel interactivo
+     trazar-predio.html — Dibuja el contorno de un predio sobre el satelital
+     ----------------------------------------------------------------------------
+     PARA QUÉ SIRVE
+     El panel puede sombrear el terreno de cada proyecto, pero para eso hace
+     falta el contorno en coordenadas. Google My Maps no siempre deja dibujar
+     cómodo sobre satelital, así que esta página usa LAS MISMAS imágenes
+     satelitales que ya tiene el panel descargadas: se hace clic sobre el
+     perímetro y sale el archivo listo.
+
+     Va mostrando la superficie en hectáreas mientras se dibuja, y la compara
+     con la que declara INMOL. Es la forma de saber si el trazo está bien sin
+     depender del ojo: si el número no se acerca, el contorno está mal.
+
+     CÓMO SE USA
+       1. Abrir este archivo con doble clic (funciona sin conexión).
+       2. Elegir el proyecto arriba.
+       3. Ir haciendo clic sobre cada esquina del terreno. Se puede arrastrar
+          un punto para corregirlo, o usar «Deshacer».
+       4. Cuando el área se acerque a la declarada, «Copiar para predios.js»
+          o «Descargar KML».
+
+     SÓLO PARA DESARROLLO. El panel de feria no usa este archivo.
+     ============================================================================ -->
+<link rel="stylesheet" href="../assets/leaflet/leaflet.css">
+<style>
+  :root { --rojo: #E3333E; --morado: #7B2FD6; }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, "Segoe UI", sans-serif; color: #111; }
+  #barra {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    padding: 12px 18px; background: #F7FAFC; border-bottom: 1px solid #E2E8F0;
+  }
+  #barra b { font-size: 16px; }
+  select, button {
+    font: inherit; padding: 7px 14px; border-radius: 8px;
+    border: 1px solid #CBD5E0; background: #fff; cursor: pointer;
+  }
+  button.principal { background: var(--morado); border-color: var(--morado); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  #mapa { position: absolute; inset: 0; top: auto; height: calc(100vh - 118px); }
+  #medida {
+    margin-left: auto; text-align: right; font-size: 14px; line-height: 1.35;
+  }
+  #medida b { font-size: 20px; }
+  .bien { color: #1E9E6A; } .mal { color: var(--rojo); }
+  #ayuda { padding: 8px 18px; font-size: 13px; color: #4A5568; background: #fff;
+           border-bottom: 1px solid #E2E8F0; }
+  #salida {
+    position: absolute; left: 18px; right: 18px; bottom: 18px; z-index: 1000;
+    max-height: 32vh; overflow: auto; padding: 12px 14px; display: none;
+    background: rgba(255,255,255,.97); border: 1px solid #CBD5E0; border-radius: 10px;
+    font: 12px/1.45 ui-monospace, Consolas, monospace; word-break: break-all;
+    box-shadow: 0 8px 24px rgba(0,0,0,.18);
+  }
+  .vertice { background: #fff; border: 2px solid var(--morado); border-radius: 50%; }
+</style>
+
+<div id="barra">
+  <b>Trazar el contorno del terreno</b>
+  <select id="proyecto"></select>
+  <button id="deshacer">Deshacer</button>
+  <button id="limpiar">Limpiar</button>
+  <button id="copiar" class="principal" disabled>Copiar para predios.js</button>
+  <button id="kml" disabled>Descargar KML</button>
+  <div id="medida">—</div>
+</div>
+<div id="ayuda">
+  Clic sobre cada esquina del terreno. Se puede arrastrar un punto para corregirlo.
+  El contorno se cierra solo. Rueda del ratón para acercar.
+</div>
+<div id="mapa"></div>
+<pre id="salida"></pre>
+
+<script src="../assets/leaflet/leaflet.js"></script>
+<script src="../js/disponibilidad-el-encanto.js"></script>
+<script src="../js/disponibilidad-libertad.js"></script>
+<script src="../js/disponibilidad-el-encanto-2.js"></script>
+<script src="../js/rutas.js"></script>
+<script src="../js/calles.js"></script>
+<script src="../js/predios.js"></script>
+<script src="../js/datos.js"></script>
+<script>
+/* Superficie declarada por INMOL, en hectáreas: es contra esto que se compara
+   el trazo. Sale de los datos del proyecto, buscando el destacado que la trae. */
+function haDeclaradas(p) {
+  // "9.584,34" → 9584.34 (punto de miles, coma decimal, como se escribe acá)
+  const num = v => parseFloat(String(v).replace(/\./g, '').replace(',', '.'));
+
+  /* Primero se busca un valor que sea SÓLO una cifra en hectáreas. El orden
+     importa: El Encanto trae «300 – 600 m²», que es lo que mide cada lote, no
+     el predio. Si se acepta cualquier cosa con m² se toma ese rango y el
+     contraste queda inservible. */
+  for (const d of p.destacados || []) {
+    if (/^[\d.,]+\s*ha$/i.test(String(d.valor).trim())) {
+      const n = num(String(d.valor).replace(/\s*ha$/i, ''));
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  // Si no hay hectáreas, sirve una superficie en m² siempre que sea un solo
+  // número: un rango («300 – 600 m²») es medida de lote, no del terreno.
+  for (const d of p.destacados || []) {
+    if (/^[\d.,]+\s*m²$/i.test(String(d.valor).trim())) {
+      const n = num(String(d.valor).replace(/\s*m²$/i, ''));
+      if (Number.isFinite(n)) return n / 10000;
+    }
+  }
+  return null;
+}
+
+/* Área del polígono en hectáreas. Se proyecta a metros alrededor del propio
+   predio: a esta escala el error de tomar la Tierra como plana es despreciable. */
+function hectareas(pts) {
+  if (pts.length < 3) return 0;
+  let a = 0;
+  const k = Math.cos(pts[0][0] * Math.PI / 180) * 111320, m = 111320;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) {
+    a += (pts[j][1] * k) * (pts[i][0] * m) - (pts[i][1] * k) * (pts[j][0] * m);
+  }
+  return Math.abs(a / 2) / 10000;
+}
+
+const mapa = L.map('mapa', { zoomControl: true, minZoom: 12, maxZoom: 19 });
+let capa = null, proyecto = null;
+let puntos = [];                 // [lat, lng]
+let poligono = null, marcas = [];
+
+const sel = document.getElementById('proyecto');
+PANEL.proyectos.forEach(p => {
+  const o = document.createElement('option');
+  o.value = p.id; o.textContent = p.nombre;
+  sel.appendChild(o);
+});
+
+function cargar(id) {
+  proyecto = PANEL.proyectos.find(p => p.id === id);
+  if (capa) mapa.removeLayer(capa);
+  capa = L.tileLayer(`../assets/tiles/${proyecto.id}/{z}/{x}/{y}.jpg`,
+    { minZoom: 14, maxZoom: 19, attribution: '© Esri — precargadas' }).addTo(mapa);
+  mapa.setView([proyecto.coordenadas.lat, proyecto.coordenadas.lng], 16);
+
+  L.marker([proyecto.coordenadas.lat, proyecto.coordenadas.lng])
+    .addTo(mapa).bindTooltip(proyecto.nombre);
+
+  /* Si el proyecto ya tiene contorno guardado, se carga para poder retocarlo
+     en vez de empezar de cero. */
+  puntos = [];
+  const guardado = (typeof PREDIOS !== 'undefined' && PREDIOS[proyecto.id]) || [];
+  if (guardado.length) {
+    puntos = guardado[0].puntos.slice();
+    // El polígono guardado repite el primer punto al final; acá sobra.
+    if (puntos.length > 2 &&
+        puntos[0][0] === puntos[puntos.length - 1][0] &&
+        puntos[0][1] === puntos[puntos.length - 1][1]) puntos.pop();
+  }
+  redibujar();
+}
+
+function redibujar() {
+  if (poligono) mapa.removeLayer(poligono);
+  marcas.forEach(m => mapa.removeLayer(m));
+  marcas = [];
+
+  if (puntos.length >= 2) {
+    poligono = L.polygon(puntos, {
+      color: '#7B2FD6', weight: 3, fillColor: '#7B2FD6', fillOpacity: .22
+    }).addTo(mapa);
+  } else if (poligono) { poligono = null; }
+
+  puntos.forEach((p, i) => {
+    const m = L.marker(p, {
+      draggable: true,
+      icon: L.divIcon({ className: 'vertice', iconSize: [14, 14], iconAnchor: [7, 7] })
+    }).addTo(mapa);
+    m.on('drag', e => { puntos[i] = [e.latlng.lat, e.latlng.lng]; medir(); if (poligono) poligono.setLatLngs(puntos); });
+    m.on('dragend', redibujar);
+    // Clic derecho sobre un punto lo borra: es lo más rápido para corregir.
+    m.on('contextmenu', () => { puntos.splice(i, 1); redibujar(); });
+    marcas.push(m);
+  });
+  medir();
+}
+
+function medir() {
+  const ha = hectareas(puntos);
+  const dec = haDeclaradas(proyecto);
+  const caja = document.getElementById('medida');
+  const listo = puntos.length >= 3;
+  document.getElementById('copiar').disabled = !listo;
+  document.getElementById('kml').disabled = !listo;
+
+  if (!listo) { caja.innerHTML = `${puntos.length} punto(s) — faltan al menos 3`; return; }
+  let veredicto = '';
+  if (dec) {
+    const dif = Math.abs(ha - dec) / dec * 100;
+    veredicto = `<span class="${dif <= 12 ? 'bien' : 'mal'}">` +
+                `${dif <= 12 ? 'coincide' : 'no coincide'} · ${dif.toFixed(0)}% de diferencia</span>`;
+  }
+  caja.innerHTML = `<b>${ha.toFixed(2)} ha</b> · ${puntos.length} puntos<br>` +
+                   (dec ? `INMOL declara ${dec.toFixed(2)} ha — ${veredicto}` : '');
+}
+
+mapa.on('click', e => { puntos.push([e.latlng.lat, e.latlng.lng]); redibujar(); });
+
+document.getElementById('deshacer').onclick = () => { puntos.pop(); redibujar(); };
+document.getElementById('limpiar').onclick  = () => { puntos = []; redibujar(); };
+
+const red = n => Math.round(n * 1e6) / 1e6;
+const cerrado = () => puntos.concat([puntos[0]]).map(p => [red(p[0]), red(p[1])]);
+
+document.getElementById('copiar').onclick = () => {
+  const dato = {};
+  dato[proyecto.id] = [{ nombre: proyecto.nombre, puntos: cerrado() }];
+  const txt = JSON.stringify(dato);
+  document.getElementById('salida').style.display = 'block';
+  document.getElementById('salida').textContent =
+    'Pegale esto a Claude, o mételo en js/predios.js dentro de PREDIOS:\n\n' + txt;
+  navigator.clipboard && navigator.clipboard.writeText(txt);
+};
+
+document.getElementById('kml').onclick = () => {
+  const c = cerrado().map(p => `${p[1]},${p[0]},0`).join(' ');
+  const kml = `<?xml version="1.0" encoding="UTF-8"?>
+<kml xmlns="http://www.opengis.net/kml/2.2"><Document>
+<Placemark><name>${proyecto.nombre}</name>
+<Polygon><outerBoundaryIs><LinearRing><coordinates>${c}</coordinates></LinearRing></outerBoundaryIs></Polygon>
+</Placemark></Document></kml>`;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([kml], { type: 'application/vnd.google-earth.kml+xml' }));
+  a.download = proyecto.id + '.kml';
+  a.click();
+};
+
+sel.onchange = () => cargar(sel.value);
+cargar(PANEL.proyectos[0].id);
+</script>

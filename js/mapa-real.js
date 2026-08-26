@@ -239,9 +239,13 @@ const MapaReal = {
       const base = L.polygon(area.puntos, {
         color: '#FFFFFF', weight: 6, opacity: .75, fill: false, interactive: false
       }).addTo(this.mapa);
+      /* Morado y no rojo: el rojo ya lo usan el pin del proyecto, los pines de
+         referencia y una de las rutas de acceso. El morado se despega de todo
+         eso y del verde del monte. Cada predio puede traer su propio color. */
+      const tono = area.color || '#7B2FD6';
       const linea = L.polygon(area.puntos, {
-        color: '#E3333E', weight: 3, opacity: 1, dashArray: '10 6',
-        fillColor: '#E3333E', fillOpacity: .16
+        color: tono, weight: 3, opacity: 1, dashArray: '10 6',
+        fillColor: tono, fillOpacity: .22
       }).addTo(this.mapa).bindPopup(
         `<b>${area.nombre || proyecto.nombre}</b><br>${this.hectareas(area.puntos)} ha`);
       this.predio.push(base, linea);
