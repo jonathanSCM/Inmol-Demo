@@ -26,6 +26,7 @@ const MapaReal = {
   marcadoresOtros: [],     // pines discretos de los demás proyectos
   rutas: [],               // líneas de acceso (ver dibujarRutas)
   calles: [],              // guía de nombres de calles (ver dibujarCalles)
+  predio: [],              // contorno del terreno (ver dibujarPredio)
   disponible: false,
   proyectoActual: null,
   limiteProyecto: null,    // límite de arrastre cuando se está en zoom de detalle
@@ -217,6 +218,46 @@ const MapaReal = {
     return Math.hypot(dx, dy);
   },
 
+  /* ==========================================================================
+     CONTORNO DEL TERRENO
+     --------------------------------------------------------------------------
+     Los planos comerciales de INMOL sombrean el predio para que se vea de un
+     vistazo qué superficie ocupa. Acá se hace lo mismo sobre el satelital: un
+     relleno translúcido con borde marcado, por debajo de las rutas y los pines.
+     El contorno vive en js/predios.js y se dibuja en Google My Maps; ver
+     herramientas/importar-rutas.js. Si un proyecto todavía no lo tiene, no se
+     dibuja nada y el mapa queda como antes.
+     ========================================================================== */
+  dibujarPredio(proyecto) {
+    this.predio.forEach(c => this.mapa.removeLayer(c));
+    this.predio = [];
+    const lista = (typeof PREDIOS !== 'undefined' ? PREDIOS[proyecto.id] : null) || [];
+
+    lista.forEach(area => {
+      /* Trazo blanco por debajo: el borde rojo solo se pierde sobre los techos
+         claros y sobre la tierra removida de un loteo nuevo. */
+      const base = L.polygon(area.puntos, {
+        color: '#FFFFFF', weight: 6, opacity: .75, fill: false, interactive: false
+      }).addTo(this.mapa);
+      const linea = L.polygon(area.puntos, {
+        color: '#E3333E', weight: 3, opacity: 1, dashArray: '10 6',
+        fillColor: '#E3333E', fillOpacity: .16
+      }).addTo(this.mapa).bindPopup(
+        `<b>${area.nombre || proyecto.nombre}</b><br>${this.hectareas(area.puntos)} ha`);
+      this.predio.push(base, linea);
+    });
+  },
+
+  /* Superficie del polígono, redondeada, para la etiqueta. */
+  hectareas(p) {
+    let a = 0;
+    const k = Math.cos(p[0][0] * Math.PI / 180) * 111320, m = 111320;
+    for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
+      a += (p[j][1] * k) * (p[i][0] * m) - (p[i][1] * k) * (p[j][0] * m);
+    }
+    return (Math.abs(a / 2) / 10000).toFixed(2);
+  },
+
   dibujarRutas(proyecto) {
     this.rutas.forEach(l => this.mapa.removeLayer(l));
     this.rutas = [];
@@ -246,15 +287,13 @@ const MapaReal = {
       if (ruta.desde) avenidasPuestas.add(ruta.desde);
       /* Si justo ahí ya hay un pin de referencia —en El Encanto 2 el arranque
          cae sobre el «Cruce Km 13»— el rótulo diría dos veces lo mismo y los
-         globos se pisan. Pero esos pines se esconden al alejarse, y entonces
-         el número quedaba solo, sin decir por dónde se entra: el rótulo se
-         marca como duplicado y aparece justo cuando el pin no está. */
+         globos se pisan. En ese caso el nombre queda sólo en el popup. */
       const yaHayPin = (proyecto.referencias || []).some(ref => {
         const p = this.posicionReferencia(proyecto, ref);
         return this.metros(inicio, [p[0], p[1]]) < 200;
       });
-      const rotulo = (ruta.desde && !repetida)
-        ? `<b class="pin-ruta-via${yaHayPin ? ' pin-ruta-via-dup' : ''}">${ruta.desde}</b>` : '';
+      const rotulo = (ruta.desde && !repetida && !yaHayPin)
+        ? `<b class="pin-ruta-via">${ruta.desde}</b>` : '';
       /* Los dos ingresos del centro comercial salen del mismo punto del centro
          de la ciudad: sin esto el ① queda escondido debajo del ②. */
       const encimado = arranques.some(p => this.metros(p, inicio) < 250);
@@ -271,35 +310,6 @@ const MapaReal = {
                    (ruta.desde ? `<br>Se llega por ${ruta.desde}` : ''));
       this.rutas.push(numero);
     });
-
-    /* Dos ingresos pueden terminar compartiendo la misma avenida —en el
-       Comercial los últimos 3,2 km son idénticos, igual que en el plano de
-       INMOL—. Dibujados uno encima del otro, el de abajo desaparece y de cerca
-       parece que sólo hay un acceso. Se repasa ese tramo con la línea de abajo
-       punteada por encima: asoman los dos colores y se leen los dos ingresos. */
-    for (let i = 0; i < lista.length; i++) {
-      for (let j = i + 1; j < lista.length; j++) {
-        const tramo = this.tramoFinalComun(lista[i].puntos, lista[j].puntos);
-        if (!tramo.length) continue;
-        this.rutas.push(L.polyline(tramo, {
-          color: lista[i].color, weight: 4, opacity: .95,
-          dashArray: '2 13', lineCap: 'round', interactive: false
-        }).addTo(this.mapa));
-      }
-    }
-  },
-
-  /* El tramo final que dos recorridos recorren exactamente igual, comparando
-     punto por punto desde el proyecto hacia atrás. Menos de dos puntos no es
-     un tramo: es sólo la llegada compartida. */
-  tramoFinalComun(a, b) {
-    let n = 0;
-    while (n < a.length && n < b.length) {
-      const p = a[a.length - 1 - n], q = b[b.length - 1 - n];
-      if (Math.abs(p[0] - q[0]) > 1e-6 || Math.abs(p[1] - q[1]) > 1e-6) break;
-      n++;
-    }
-    return n >= 2 ? a.slice(a.length - n) : [];
   },
 
   /* ==========================================================================
@@ -407,6 +417,10 @@ const MapaReal = {
     this.proyectoActual = proyecto;
     this.marcadores.forEach(m => this.mapa.removeLayer(m));
     this.marcadores = [];
+    /* El predio primero: al dibujarse antes queda por debajo de las rutas y
+       los pines sin tener que reordenar capas después. bringToBack() aquí
+       falla, porque el lienzo de Leaflet todavía no está listo. */
+    this.dibujarPredio(proyecto);
     this.dibujarRutas(proyecto);
     this.dibujarCalles(proyecto);
 
@@ -458,11 +472,6 @@ const MapaReal = {
       if (el) el.style.display = cerca ? '' : 'none';
       if (m.setStyle) m.setStyle({ opacity: cerca ? .45 : 0 });
     });
-    /* El rótulo del ingreso que repetía un pin cercano hace el relevo: se
-       muestra justo cuando ese pin se esconde. */
-    document.querySelectorAll('.pin-ruta-via-dup').forEach(el => {
-      el.style.display = cerca ? 'none' : '';
-    });
   },
 
   /* Encuadra el proyecto con todas sus referencias.
@@ -477,6 +486,8 @@ const MapaReal = {
        los pines, las líneas se salen de la pantalla y quedan cortadas, como si
        no llevaran a ninguna parte. */
     this.rutas.forEach(l => { if (l.getLatLngs) puntos.push(...l.getLatLngs()); });
+    // El contorno del terreno también entra en el encuadre.
+    this.predio.forEach(l => { if (l.getLatLngs) puntos.push(...l.getLatLngs().flat()); });
 
     /* La ficha de ubicación flota sobre la esquina superior izquierda y los
        botones sobre la inferior. Si el encuadre no los descuenta, el arranque

@@ -35,6 +35,7 @@ const vm = require('vm');
 
 const RAIZ = path.resolve(__dirname, '..');
 const DESTINO = path.join(RAIZ, 'js', 'rutas.js');
+const DESTINO_PREDIO = path.join(RAIZ, 'js', 'predios.js');
 
 /* Colores de reserva, en el orden en que se numeran las rutas en el mapa.
    Sólo se usan si la línea no traía color propio desde My Maps. */
@@ -85,8 +86,12 @@ function leerKml(texto) {
   const rePlace = /<Placemark>([\s\S]*?)<\/Placemark>/g;
   while ((m = rePlace.exec(texto))) {
     const cuerpo = m[1];
-    // Sólo interesan las líneas: los pines sueltos se ignoran.
-    const coords = /<LineString>[\s\S]*?<coordinates>([\s\S]*?)<\/coordinates>/.exec(cuerpo);
+    /* Interesan las líneas (recorridos de acceso) y los polígonos (el contorno
+       del terreno). Los pines sueltos se ignoran. */
+    const coords =
+      /<LineString>[\s\S]*?<coordinates>([\s\S]*?)<\/coordinates>/.exec(cuerpo) ||
+      /<Polygon>[\s\S]*?<coordinates>([\s\S]*?)<\/coordinates>/.exec(cuerpo);
+    const esPredio = /<Polygon>/.test(cuerpo);
     if (!coords) continue;
 
     /* KML escribe  longitud,latitud[,altura]  — al revés que Leaflet. */
@@ -103,6 +108,7 @@ function leerKml(texto) {
     rutas.push({
       nombre: nombre || ('Ingreso ' + (rutas.length + 1)),
       color: colorDesdeKml(propio) || estilos[url] || null,
+      predio: esPredio,
       puntos
     });
   }
@@ -116,7 +122,7 @@ function leerGeoJson(texto) {
                : doc.type === 'Feature' ? [doc] : [];
   const rutas = [];
 
-  const agregar = (coordenadas, props, i) => {
+  const agregar = (coordenadas, props, i, esPredio) => {
     const puntos = coordenadas
       .map(c => [red(c[1]), red(c[0])])
       .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
@@ -124,6 +130,7 @@ function leerGeoJson(texto) {
     rutas.push({
       nombre: (props && (props.name || props.nombre)) || ('Ingreso ' + (i + 1)),
       color: (props && (props.stroke || props.color)) || null,
+      predio: !!esPredio,
       puntos
     });
   };
@@ -133,22 +140,38 @@ function leerGeoJson(texto) {
     if (!g) return;
     if (g.type === 'LineString') agregar(g.coordinates, f.properties, i);
     else if (g.type === 'MultiLineString') g.coordinates.forEach(l => agregar(l, f.properties, i));
+    else if (g.type === 'Polygon') agregar(g.coordinates[0], f.properties, i, true);
+    else if (g.type === 'MultiPolygon') g.coordinates.forEach(p => agregar(p[0], f.properties, i, true));
   });
   return rutas;
 }
 
 /* --- Rutas que ya existen: sólo se reemplazan las de los archivos dados --- */
-let anterior = {};
-if (fs.existsSync(DESTINO)) {
+function cargar(archivo, nombreVar) {
+  if (!fs.existsSync(archivo)) return {};
   const ctx = {};
   vm.createContext(ctx);
-  vm.runInContext(fs.readFileSync(DESTINO, 'utf8') + '\n;this.RUTAS = RUTAS;', ctx);
-  anterior = ctx.RUTAS || {};
+  vm.runInContext(fs.readFileSync(archivo, 'utf8') + ';this.X = ' + nombreVar + ';', ctx);
+  return ctx.X || {};
 }
+let anterior = cargar(DESTINO, 'RUTAS');
+let anteriorPredio = cargar(DESTINO_PREDIO, 'PREDIOS');
 
 /* --- Proceso -------------------------------------------------------------- */
 const resultado = Object.assign({}, anterior);
+const resultadoPredio = Object.assign({}, anteriorPredio);
 let total = 0;
+
+/* Superficie del polígono en hectáreas, para poder contrastarla con la que
+   declara INMOL: si no coincide, el contorno está mal dibujado. */
+function hectareas(p) {
+  let a = 0;
+  const k = Math.cos(p[0][0] * Math.PI / 180) * 111320, m = 111320;
+  for (let x = 0, y = p.length - 1; x < p.length; y = x++) {
+    a += (p[y][1] * k) * (p[x][0] * m) - (p[x][1] * k) * (p[y][0] * m);
+  }
+  return Math.abs(a / 2) / 10000;
+}
 
 archivos.forEach(archivo => {
   const ruta = path.resolve(archivo);
@@ -170,16 +193,32 @@ archivos.forEach(archivo => {
     return;
   }
 
-  // Se completa el color sólo donde el dibujo no traía uno.
-  rutas.forEach((r, i) => { if (!r.color) r.color = PALETA[i % PALETA.length]; });
+  /* Los polígonos son el contorno del terreno; las líneas, los accesos. Van a
+     archivos distintos porque el mapa los dibuja de forma muy distinta. */
+  const lineas  = rutas.filter(r => !r.predio);
+  const predios = rutas.filter(r => r.predio);
 
-  resultado[proyecto] = rutas;
-  console.log('  OK     ' + proyecto.padEnd(14) + ' ' + rutas.length + ' línea(s)');
-  rutas.forEach((r, i) => {
-    console.log('         ' + (i + 1) + '. ' + r.nombre.padEnd(38) +
-                String(r.puntos.length).padStart(4) + ' puntos  ' + r.color);
-    total += r.puntos.length;
-  });
+  lineas.forEach((r, i) => { if (!r.color) r.color = PALETA[i % PALETA.length]; });
+
+  if (lineas.length) {
+    resultado[proyecto] = lineas.map(r => ({ nombre: r.nombre, desde: r.desde,
+                                             color: r.color, puntos: r.puntos }));
+    console.log('  OK     ' + proyecto.padEnd(14) + lineas.length + ' línea(s) de acceso');
+    lineas.forEach((r, i) => {
+      console.log('         ' + (i + 1) + '. ' + r.nombre.padEnd(34) +
+                  String(r.puntos.length).padStart(4) + ' puntos  ' + r.color);
+      total += r.puntos.length;
+    });
+  }
+
+  if (predios.length) {
+    // Si hay varios polígonos se quedan todos: un predio puede venir en partes.
+    resultadoPredio[proyecto] = predios.map(p => ({ nombre: p.nombre, puntos: p.puntos }));
+    console.log('  OK     ' + proyecto.padEnd(14) + predios.length + ' contorno(s) de terreno');
+    predios.forEach(p => console.log('         · ' + p.nombre.padEnd(34) +
+                                     String(p.puntos.length).padStart(4) + ' vértices · ' +
+                                     hectareas(p.puntos).toFixed(2) + ' ha'));
+  }
 });
 
 if (!Object.keys(resultado).length) { console.log('\nNo se generó nada.'); process.exit(1); }
@@ -194,4 +233,15 @@ const cabecera =
 fs.writeFileSync(DESTINO, cabecera + 'const RUTAS = ' + JSON.stringify(resultado) + ';\n', 'utf8');
 console.log('\njs/rutas.js actualizado · ' + Object.keys(resultado).length +
             ' proyecto(s), ' + total + ' puntos.');
+if (Object.keys(resultadoPredio).length) {
+  const cabP =
+    '/* Contorno del terreno de cada proyecto: se pinta sobre el mapa satelital ' +
+    'para que se vea exactamente que superficie ocupa, como en los planos ' +
+    'comerciales de INMOL. GENERADO por herramientas/importar-rutas.js. */';
+  fs.writeFileSync(DESTINO_PREDIO,
+    cabP + String.fromCharCode(10) + 'const PREDIOS = ' +
+    JSON.stringify(resultadoPredio) + ';' + String.fromCharCode(10), 'utf8');
+  console.log('js/predios.js actualizado con ' +
+              Object.keys(resultadoPredio).length + ' proyecto(s).');
+}
 console.log('Recargar el panel para verlas.');
