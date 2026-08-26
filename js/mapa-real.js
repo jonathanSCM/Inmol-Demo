@@ -483,8 +483,25 @@ const MapaReal = {
      (tamaño 0 → tamaño real), una transición animada puede quedar a medias
      y el zoom queda mal calculado y pegado ahí. El "vuelo" cinematográfico
      ya lo da sobrevuelo()/acercar(); acá interesa que el encuadre sea exacto. */
-  centrar() {
+  /* `todo` = incluir también las referencias lejanas y los recorridos de
+     acceso. Sin eso el encuadre se ajusta al terreno del proyecto, que es lo
+     que interesa al abrir Ubicación: con las referencias mandando, la Plaza de
+     La Guardia —a 6,8 km— obligaba a alejarse tanto que el predio quedaba del
+     tamaño de una uña. El botón «Ver todo» sigue mostrando el conjunto. */
+  centrar(todo = true) {
     if (!this.mapa || !this.marcadores.length) return;
+
+    const predio = [];
+    this.predio.forEach(l => { if (l.getLatLngs) predio.push(...l.getLatLngs().flat()); });
+    if (!todo && predio.length > 2) {
+      this.mapa.fitBounds(L.latLngBounds(predio), {
+        paddingTopLeft: [this.anchoFicha() + 40, 40],
+        paddingBottomRight: [60, 110],
+        maxZoom: 17, animate: false
+      });
+      return;
+    }
+
     const puntos = this.marcadores.filter(m => m.getLatLng).map(m => m.getLatLng());
     /* Las rutas de acceso también entran en el encuadre: si sólo se ajusta a
        los pines, las líneas se salen de la pantalla y quedan cortadas, como si
@@ -498,18 +515,22 @@ const MapaReal = {
        de una ruta puede quedar escondido detrás de la ficha —que fue justo lo
        que pasaba con el Ingreso 2 de Libertad—. Se mide la ficha en vivo, para
        que siga funcionando cuando la pantalla cambia de tamaño. */
-    const ficha = this.mapa.getContainer().parentElement.querySelector('.sat-hud');
-    const anchoFicha = ficha ? Math.round(ficha.getBoundingClientRect().width) : 0;
-
     if (puntos.length > 1) {
       this.mapa.fitBounds(L.latLngBounds(puntos), {
-        paddingTopLeft:     [anchoFicha + 40, 40],
+        paddingTopLeft:     [this.anchoFicha() + 40, 40],
         paddingBottomRight: [60, 110],
         maxZoom: 16, animate: false
       });
     } else {
       this.mapa.setView(puntos[0], 16, { animate: false });
     }
+  },
+
+  /* Ancho de la ficha flotante de ubicación, que tapa la esquina superior
+     izquierda del mapa. Se mide en vivo: cambia con el tamaño de pantalla. */
+  anchoFicha() {
+    const f = this.mapa.getContainer().parentElement.querySelector('.sat-hud');
+    return f ? Math.round(f.getBoundingClientRect().width) : 0;
   },
 
   /* Vuela hasta un punto de referencia y abre su etiqueta */
@@ -537,7 +558,7 @@ const MapaReal = {
   redimensionar() {
     if (!this.mapa) return;
     this.mapa.invalidateSize();
-    this.centrar();
+    this.centrar(false);          // al abrir Ubicación manda el terreno
     // Recién ahora el mapa tiene tamaño: es el momento de rotular las calles.
     this.actualizarCalles();
   },

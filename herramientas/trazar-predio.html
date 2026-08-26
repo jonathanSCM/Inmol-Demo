@@ -62,6 +62,7 @@
 <div id="barra">
   <b>Trazar el contorno del terreno</b>
   <select id="proyecto"></select>
+  <button id="delotes">Generar de los lotes</button>
   <button id="deshacer">Deshacer</button>
   <button id="limpiar">Limpiar</button>
   <button id="copiar" class="principal" disabled>Copiar para predios.js</button>
@@ -69,8 +70,9 @@
   <div id="medida">—</div>
 </div>
 <div id="ayuda">
-  Clic sobre cada esquina del terreno. Se puede arrastrar un punto para corregirlo.
-  El contorno se cierra solo. Rueda del ratón para acercar.
+  Clic sobre cada esquina del terreno · arrastrar un punto lo corrige · clic derecho lo borra ·
+  <b>arrastrar dentro del polígono lo mueve entero</b> · teclas <b>Q</b> y <b>E</b> lo giran ·
+  <b>+</b> y <b>−</b> del teclado lo agrandan o achican.
 </div>
 <div id="mapa"></div>
 <pre id="salida"></pre>
@@ -203,7 +205,107 @@ function medir() {
                    (dec ? `INMOL declara ${dec.toFixed(2)} ha — ${veredicto}` : '');
 }
 
-mapa.on('click', e => { puntos.push([e.latlng.lat, e.latlng.lng]); redibujar(); });
+/* --- Contorno deducido de los lotes ---------------------------------------
+   El plano de INMOL trae la posición de cada lote en píxeles. Su envolvente es
+   la forma del predio; escalándola para que dé la superficie declarada se
+   obtiene un contorno del tamaño correcto. Lo que no se puede deducir es dónde
+   cae ni cómo está girado, así que se deja en el centro del proyecto para
+   moverlo y girarlo encima de la foto. */
+function contornoDeLotes() {
+  const lotes = { 'el-encanto': typeof DISP_EL_ENCANTO !== 'undefined' ? DISP_EL_ENCANTO : null,
+                  'libertad': typeof DISP_LIBERTAD !== 'undefined' ? DISP_LIBERTAD : null,
+                  'el-encanto-2': typeof DISP_EL_ENCANTO_2 !== 'undefined' ? DISP_EL_ENCANTO_2 : null
+                }[proyecto.id];
+  if (!lotes || !lotes.length) { alert('Este proyecto no tiene lotes cargados.'); return; }
+
+  const P = lotes.map(l => [l.x, l.y]);
+  const cruz = (o, a, b) => (a[0]-o[0])*(b[1]-o[1]) - (a[1]-o[1])*(b[0]-o[0]);
+  const s = P.slice().sort((a, b) => a[0]-b[0] || a[1]-b[1]);
+  const lo = [], hi = [];
+  for (const p of s) { while (lo.length > 1 && cruz(lo[lo.length-2], lo[lo.length-1], p) <= 0) lo.pop(); lo.push(p); }
+  for (const p of s.slice().reverse()) { while (hi.length > 1 && cruz(hi[hi.length-2], hi[hi.length-1], p) <= 0) hi.pop(); hi.push(p); }
+  const hull = lo.slice(0, -1).concat(hi.slice(0, -1));
+
+  const areaPx = Math.abs(hull.reduce((a, _, i, q) => {
+    const j = (i + 1) % q.length; return a + q[i][0]*q[j][1] - q[j][0]*q[i][1];
+  }, 0) / 2);
+  const ha = haDeclaradas(proyecto) || 1;
+  const mPorPx = Math.sqrt(ha * 10000 / areaPx);
+
+  const cx = hull.reduce((a, p) => a + p[0], 0) / hull.length;
+  const cy = hull.reduce((a, p) => a + p[1], 0) / hull.length;
+  const lat0 = proyecto.coordenadas.lat, lng0 = proyecto.coordenadas.lng;
+  const mLat = 111320, mLng = 111320 * Math.cos(lat0 * Math.PI / 180);
+
+  // y del plano crece hacia abajo; la latitud, hacia arriba.
+  puntos = hull.map(p => [lat0 - ((p[1] - cy) * mPorPx) / mLat,
+                          lng0 + ((p[0] - cx) * mPorPx) / mLng]);
+  redibujar();
+}
+document.getElementById('delotes').onclick = contornoDeLotes;
+
+/* --- Mover, girar y escalar el contorno entero --------------------------- */
+function centro() {
+  return [puntos.reduce((a, p) => a + p[0], 0) / puntos.length,
+          puntos.reduce((a, p) => a + p[1], 0) / puntos.length];
+}
+function transformar(fn) {
+  if (puntos.length < 3) return;
+  const [cLat, cLng] = centro();
+  const k = Math.cos(cLat * Math.PI / 180);
+  puntos = puntos.map(p => {
+    // a metros relativos al centro, se transforma, y de vuelta a grados
+    const x = (p[1] - cLng) * 111320 * k, y = (p[0] - cLat) * 111320;
+    const [nx, ny] = fn(x, y);
+    return [cLat + ny / 111320, cLng + nx / (111320 * k)];
+  });
+  redibujar();
+}
+function girar(grados) {
+  const a = grados * Math.PI / 180, s = Math.sin(a), c = Math.cos(a);
+  transformar((x, y) => [x * c - y * s, x * s + y * c]);
+}
+function escalar(f) { transformar((x, y) => [x * f, y * f]); }
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'q' || e.key === 'Q') girar(-2);
+  else if (e.key === 'e' || e.key === 'E') girar(2);
+  else if (e.key === '+' || e.key === '=') escalar(1.02);
+  else if (e.key === '-' || e.key === '_') escalar(1 / 1.02);
+});
+
+/* Arrastrar dentro del polígono lo mueve entero. */
+let arrastre = null;
+mapa.on('mousedown', e => {
+  if (puntos.length < 3 || !poligono) return;
+  if (!dentro(e.latlng.lat, e.latlng.lng)) return;
+  arrastre = e.latlng; mapa.dragging.disable();
+});
+mapa.on('mousemove', e => {
+  if (!arrastre) return;
+  const dLat = e.latlng.lat - arrastre.lat, dLng = e.latlng.lng - arrastre.lng;
+  puntos = puntos.map(p => [p[0] + dLat, p[1] + dLng]);
+  arrastre = e.latlng;
+  if (poligono) poligono.setLatLngs(puntos);
+});
+mapa.on('mouseup', () => { if (arrastre) { arrastre = null; mapa.dragging.enable(); redibujar(); } });
+
+/* ¿Cae el punto dentro del polígono? (algoritmo del rayo) */
+function dentro(lat, lng) {
+  let d = false;
+  for (let i = 0, j = puntos.length - 1; i < puntos.length; j = i++) {
+    const [ai, bi] = puntos[i], [aj, bj] = puntos[j];
+    if ((bi > lng) !== (bj > lng) && lat < (aj - ai) * (lng - bi) / (bj - bi) + ai) d = !d;
+  }
+  return d;
+}
+
+mapa.on('click', e => {
+  if (arrastre) return;
+  // Clic dentro del polígono ya hecho: no agrega vértices, sirve para moverlo.
+  if (puntos.length >= 3 && dentro(e.latlng.lat, e.latlng.lng)) return;
+  puntos.push([e.latlng.lat, e.latlng.lng]); redibujar();
+});
 
 document.getElementById('deshacer').onclick = () => { puntos.pop(); redibujar(); };
 document.getElementById('limpiar').onclick  = () => { puntos = []; redibujar(); };
