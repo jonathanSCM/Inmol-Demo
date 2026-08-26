@@ -394,8 +394,14 @@ const MapaReal = {
       // Nunca de cabeza: si va hacia la izquierda, se le da media vuelta.
       if (ang > 90) ang -= 180;
       if (ang < -90) ang += 180;
+      // El div que devuelve getElement() es el que Leaflet mueve con su
+      // propio transform (translate3d) para posicionar el marcador: tocarlo
+      // acá pisaría esa posición. La rotación va en el <span> de adentro, que
+      // Leaflet no toca, y se reemplaza entero (no se acumula) para que cada
+      // zoom/paneo no vaya sumando otra rotación sobre la anterior.
       const el = c.rotulo.getElement();
-      if (el) el.style.transform += ` rotate(${ang.toFixed(1)}deg)`;
+      const span = el && el.querySelector('span');
+      if (span) span.style.transform = `translate(-50%, -50%) rotate(${ang.toFixed(1)}deg)`;
     });
   },
 
