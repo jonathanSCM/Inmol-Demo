@@ -494,10 +494,14 @@ const MapaReal = {
     const predio = [];
     this.predio.forEach(l => { if (l.getLatLngs) predio.push(...l.getLatLngs().flat()); });
     if (!todo && predio.length > 2) {
+      /* El tope llega hasta donde hay teselas, en vez de a un zoom fijo: las
+         urbanizaciones son tan grandes que el encuadre nunca lo alcanza, pero
+         el terreno del centro comercial no llega a una hectárea y con el tope
+         en 17 quedaba del tamaño de una estampilla. */
       this.mapa.fitBounds(L.latLngBounds(predio), {
         paddingTopLeft: [this.anchoFicha() + 40, 40],
         paddingBottomRight: [60, 110],
-        maxZoom: 17, animate: false
+        maxZoom: this.ZOOM_MAX, animate: false
       });
       return;
     }
@@ -545,9 +549,22 @@ const MapaReal = {
     if (marcador && marcador.openPopup) setTimeout(() => marcador.openPopup(), 1700);
   },
 
-  /* Vuela al proyecto, como el sobrevuelo de la vista satelital */
+  /* Vuela al proyecto, como el sobrevuelo de la vista satelital.
+     Si el proyecto tiene contorno, el vuelo termina encuadrándolo: un zoom
+     fijo servía cuando todos eran urbanizaciones, pero el terreno del centro
+     comercial es cien veces más chico y a 17 quedaba perdido en el barrio. */
   acercar() {
     if (!this.mapa || !this.proyectoActual) return;
+    const predio = [];
+    this.predio.forEach(l => { if (l.getLatLngs) predio.push(...l.getLatLngs().flat()); });
+    if (predio.length > 2) {
+      this.mapa.flyToBounds(L.latLngBounds(predio), {
+        paddingTopLeft: [this.anchoFicha() + 40, 40],
+        paddingBottomRight: [60, 110],
+        maxZoom: this.ZOOM_MAX, duration: 2.2
+      });
+      return;
+    }
     const c = this.proyectoActual.coordenadas;
     this.mapa.flyTo([c.lat, c.lng], 17, { duration: 2.2 });
   },
