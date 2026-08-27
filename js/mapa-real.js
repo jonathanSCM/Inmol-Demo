@@ -291,13 +291,15 @@ const MapaReal = {
       if (ruta.desde) avenidasPuestas.add(ruta.desde);
       /* Si justo ahí ya hay un pin de referencia —en El Encanto 2 el arranque
          cae sobre el «Cruce Km 13»— el rótulo diría dos veces lo mismo y los
-         globos se pisan. En ese caso el nombre queda sólo en el popup. */
+         globos se pisan. Pero esos pines se esconden al alejarse, y entonces
+         el número quedaba solo, sin decir por dónde se entra: el rótulo se
+         marca como duplicado y aparece justo cuando el pin no está. */
       const yaHayPin = (proyecto.referencias || []).some(ref => {
         const p = this.posicionReferencia(proyecto, ref);
         return this.metros(inicio, [p[0], p[1]]) < 200;
       });
-      const rotulo = (ruta.desde && !repetida && !yaHayPin)
-        ? `<b class="pin-ruta-via">${ruta.desde}</b>` : '';
+      const rotulo = (ruta.desde && !repetida)
+        ? `<b class="pin-ruta-via${yaHayPin ? ' pin-ruta-via-dup' : ''}">${ruta.desde}</b>` : '';
       /* Los dos ingresos del centro comercial salen del mismo punto del centro
          de la ciudad: sin esto el ① queda escondido debajo del ②. */
       const encimado = arranques.some(p => this.metros(p, inicio) < 250);
@@ -314,6 +316,35 @@ const MapaReal = {
                    (ruta.desde ? `<br>Se llega por ${ruta.desde}` : ''));
       this.rutas.push(numero);
     });
+
+    /* Dos ingresos pueden terminar compartiendo la misma avenida —en el
+       Comercial los últimos 3,2 km son idénticos, igual que en el plano de
+       INMOL—. Dibujados uno encima del otro, el de abajo desaparece y de cerca
+       parece que sólo hay un acceso. Se repasa ese tramo con la línea de abajo
+       punteada por encima: asoman los dos colores y se leen los dos ingresos. */
+    for (let i = 0; i < lista.length; i++) {
+      for (let j = i + 1; j < lista.length; j++) {
+        const tramo = this.tramoFinalComun(lista[i].puntos, lista[j].puntos);
+        if (!tramo.length) continue;
+        this.rutas.push(L.polyline(tramo, {
+          color: lista[i].color, weight: 4, opacity: .95,
+          dashArray: '2 13', lineCap: 'round', interactive: false
+        }).addTo(this.mapa));
+      }
+    }
+  },
+
+  /* El tramo final que dos recorridos recorren exactamente igual, comparando
+     punto por punto desde el proyecto hacia atrás. Menos de dos puntos no es
+     un tramo: es sólo la llegada compartida. */
+  tramoFinalComun(a, b) {
+    let n = 0;
+    while (n < a.length && n < b.length) {
+      const p = a[a.length - 1 - n], q = b[b.length - 1 - n];
+      if (Math.abs(p[0] - q[0]) > 1e-6 || Math.abs(p[1] - q[1]) > 1e-6) break;
+      n++;
+    }
+    return n >= 2 ? a.slice(a.length - n) : [];
   },
 
   /* ==========================================================================
@@ -475,6 +506,11 @@ const MapaReal = {
       const el = m.getElement ? m.getElement() : null;
       if (el) el.style.display = cerca ? '' : 'none';
       if (m.setStyle) m.setStyle({ opacity: cerca ? .45 : 0 });
+    });
+    /* El rótulo del ingreso que repetía un pin cercano hace el relevo: se
+       muestra justo cuando ese pin se esconde. */
+    document.querySelectorAll('.pin-ruta-via-dup').forEach(el => {
+      el.style.display = cerca ? 'none' : '';
     });
   },
 
