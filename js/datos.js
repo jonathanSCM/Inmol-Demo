@@ -129,6 +129,92 @@ const PANEL = {
         { campo: 'Estado comercial',     valor: 'En comercialización' }
       ],
 
+      /* Ficha técnica completa, transcrita de la ficha oficial de INMOL
+         (PDF-Fichas-ElEncanto2026, secciones 1 a 9 de FICHA TÉCNICA más la
+         ficha legal). La tabla corta de arriba queda como resumen; esto es el
+         detalle que el asesor muestra en pantalla.
+         Sin precios: es decisión comercial de INMOL no exhibirlos. */
+      fichaGrupos: [
+        {
+          titulo: 'Superficie',
+          filas: [
+            { campo: 'Superficie total', valor: '64,58 hectáreas · 645.801,07 m²' },
+            { campo: 'Área útil',        valor: '387.504,20 m² — 60,00 %' },
+            { campo: 'Área de calles',   valor: '118.168,45 m² — 18,30 %' },
+            { campo: 'Área de avenidas', valor: '70.356,99 m² — 10,89 %' },
+            { campo: 'Área de equipamiento', valor: '41.522,48 m² — 6,43 %' },
+            { campo: 'Áreas verdes',     valor: '28.248,95 m² — 4,37 %' },
+            { campo: 'Terrenos',         valor: '1.101 lotes de 300 m² a 851,68 m², dentro del área útil' }
+          ]
+        },
+        {
+          titulo: 'Sistema de drenaje pluvial',
+          items: [
+            'La urbanización se diseñó y construyó para que todos los lotes queden por encima de las calles y drenen el agua hacia ellas',
+            'Todas las calles cumplen la función de canalización terciaria',
+            'Aseguran la evacuación de toda el agua fuera de la urbanización, para evitar inundaciones'
+          ]
+        },
+        {
+          titulo: 'Protección contra inundaciones',
+          items: [
+            'El agua que llega de urbanizaciones vecinas se colecta en el canal P4c, construido respetando el Plan Maestro de Drenaje del Municipio de La Guardia',
+            'El canal P4b protege a las urbanizaciones vecinas del agua que sale de El Encanto'
+          ]
+        },
+        {
+          titulo: 'Protección contra la erosión',
+          items: [
+            'El 100 % de la superficie —manzanos, áreas verdes y de equipamiento— está sembrada con pasto de la variedad decumbens revestida',
+            'Protege el suelo de la erosión hídrica y eólica, típica de la zona'
+          ]
+        },
+        {
+          titulo: 'Pavimento',
+          items: [
+            'Dos accesos principales pavimentados, más de 1.500 m',
+            'Funcionan además como canales terciarios de drenaje'
+          ]
+        },
+        {
+          titulo: 'Agua potable',
+          filas: [
+            { campo: 'Red',        valor: 'Diseñada para toda la urbanización; pasa por las aceras para no perjudicar el pavimento actual ni el que se construya' },
+            { campo: 'Conexión',   valor: 'Mediante pozo propio, en coordinación con la Cooperativa de Agua Potable de La Guardia (COSPLAG)' },
+            { campo: 'Caudal',     valor: '14 a 15 litros por segundo, según la demanda proyectada' },
+            { campo: 'Pozo',       valor: '250 m de profundidad y 10” de diámetro' },
+            { campo: 'Filtros',    valor: 'De acero al carbón y tipo Johnson, para evitar la corrosión y garantizar la durabilidad' }
+          ]
+        },
+        {
+          titulo: 'Energía eléctrica y gas',
+          items: [
+            'Energía eléctrica a través de la Cooperativa Rural de Electrificación (CRE)',
+            'Gas domiciliario solicitándolo directamente a YPFB'
+          ]
+        },
+        {
+          titulo: 'Obra social ejecutada',
+          filas: [
+            { campo: 'Total invertido', valor: 'Bs. 4.213.480,67, en cumplimiento del Decreto Municipal 35/2022' },
+            { campo: 'Luminarias',      valor: '273 unidades · Bs. 581.039,55' },
+            { campo: 'Maquinaria',      valor: '1 motoniveladora modelo 140K · Bs. 2.164.560' },
+            { campo: 'Pavimento',       valor: 'Bs. 1.467.881,12' }
+          ]
+        },
+        {
+          titulo: 'Aprobaciones y documentación',
+          filas: [
+            { campo: 'Radio urbano',        valor: 'Ordenanza Municipal 35/2004 del 16 de abril de 2004, Gobierno Autónomo Municipal de La Guardia · homologada por Resolución Suprema N° 223847 del 25 de agosto de 2005' },
+            { campo: 'Urbanización abierta', valor: 'Aprobada por Decreto Municipal N° 35/2022 del 2 de septiembre de 2022' },
+            { campo: 'Licencia ambiental',  valor: 'Categoría 3, Gobierno Autónomo Departamental de Santa Cruz, 3 de febrero de 2023 · PPM-PASA 1114/22 N° 013/2023' },
+            { campo: 'Por cada lote',       valor: 'Plano de ubicación y uso de suelo, certificado catastral y matrícula registrada en Derechos Reales de Santa Cruz' },
+            { campo: 'Contrato de venta',   valor: 'Con reserva de propiedad, aprobado por el Viceministerio de Defensa de los Derechos del Usuario y del Consumidor el 14 de noviembre de 2023' },
+            { campo: 'Transferencia',       valor: 'INMOL se hace cargo de la transferencia definitiva sin costo para el comprador: asume el Impuesto a la Transferencia y los aranceles en Derechos Reales y en la Alcaldía de La Guardia' }
+          ]
+        }
+      ],
+
       plano: {
         etiqueta: 'Disponibilidad',
         prefijo: 'EC',
